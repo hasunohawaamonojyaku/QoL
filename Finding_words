@@ -1,0 +1,71 @@
+// ==UserScript==
+// @name         Keyword Highlighter
+// @namespace    http://tampermonkey.net/
+// @version      1.1
+// @description  Highlight specific keywords in paragraph elements and collect statistics
+// @author       You
+// @match        *://*/*
+// @grant        none
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function highlightKeywords() {
+        const keywords = ["honey bee", "honey bees", "bee", "bees", "pollination", "nectar", "hive", "colony"];
+        const regex = new RegExp(`(${keywords.join("|")})`, "gi");
+        const pElements = document.querySelectorAll("p");
+        const results = [];
+
+        pElements.forEach(pElement => {
+            const textContent = pElement.textContent;
+            const matches = [...textContent.matchAll(regex)];
+
+            if (matches.length > 0) {
+                let lastIndex = 0;
+                const newContent = [];
+                matches.forEach(match => {
+                    const matchIndex = match.index;
+                    if (matchIndex > lastIndex) {
+                        newContent.push(document.createTextNode(textContent.substring(lastIndex, matchIndex)));
+                    }
+                    const span = document.createElement("span");
+                    span.style.backgroundColor = "yellow";
+                    span.textContent = match[0];
+                    newContent.push(span);
+                    lastIndex = matchIndex + match[0].length;
+                });
+                if (lastIndex < textContent.length) {
+                    newContent.push(document.createTextNode(textContent.substring(lastIndex)));
+                }
+                pElement.innerHTML = "";
+                newContent.forEach(node => pElement.appendChild(node));
+                results.push({
+                    element: pElement,
+                    matchesFound: true,
+                    numberOfMatches: matches.length,
+                    textContentLength: textContent.length,
+                    keywords: keywords
+                });
+            } else {
+                results.push({
+                    element: pElement,
+                    matchesFound: false,
+                    numberOfMatches: 0,
+                    textContentLength: textContent.length,
+                    keywords: keywords
+                });
+            }
+        });
+
+        console.log('Processed paragraph data:', {results});
+    }
+
+    // Run the function immediately if the DOM is already loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', highlightKeywords);
+    } else {
+        highlightKeywords();
+    }
+})();
