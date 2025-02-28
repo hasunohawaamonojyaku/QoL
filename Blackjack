@@ -1,0 +1,434 @@
+// ==UserScript==
+// @name         Blackjack Casino
+// @namespace    http://tampermonkey.net/
+// @version      3.0
+// @description  Complete Blackjack game with shop, power-ups, and currency
+// @author       Hana
+// @match        *://*/*
+// @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @require      https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js
+// ==/UserScript==
+
+GM_addStyle(`
+  #blackjack-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    background: #2c3e50;
+    padding: 20px;
+    border-radius: 10px;
+    color: white;
+    font-family: Arial, sans-serif;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    min-width: 300px;
+  }
+
+  button {
+    background: #e74c3c;
+    border: none;
+    color: white;
+    padding: 8px 15px;
+    margin: 5px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .cards {
+    display: flex;
+    gap: 5px;
+    margin: 10px 0;
+    flex-wrap: wrap;
+  }
+
+  .card {
+    background: white;
+    color: black;
+    padding: 5px 10px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+    min-width: 40px;
+    text-align: center;
+  }
+
+  .score {
+    font-weight: bold;
+    margin: 10px 0;
+  }
+
+  .shop-item {
+    background: #34495e;
+    padding: 10px;
+    margin: 5px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .shop-item:hover {
+    background: #3d566e;
+  }
+
+  #balance {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-weight: bold;
+  }
+
+  .menu {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .powerup-active {
+    border: 2px solid #f1c40f !important;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    margin: 10px 0;
+  }
+`);
+
+class BlackjackCasino {
+  constructor() {
+    this.coins = GM_getValue('coins', 200);
+    this.betAmount = 10;
+    this.inventory = GM_getValue('inventory', {});
+    this.activePowerUps = {};
+    this.gameState = 'menu';
+    this.createContainer();
+    this.showMainMenu();
+  }
+
+  createContainer() {
+    this.container = document.createElement('div');
+    this.container.id = 'blackjack-container';
+    document.body.appendChild(this.container);
+  }
+
+  showMainMenu() {
+    this.clearContainer();
+    this.gameState = 'menu';
+
+    this.container.innerHTML = `
+      <div id="balance">Coins: ${this.coins}</div>
+      <div class="menu">
+        <h2>♠ Blackjack Casino ♣</h2>
+        <button id="start-game">New Game (Bet: ${this.betAmount})</button>
+        <input type="range" id="bet-slider" min="10" max="${Math.min(this.coins, 500000)}" value="${this.betAmount}">
+        <button id="shop">Power-Up Shop</button>
+        <button id="inventory">My Inventory</button>
+      </div>
+    `;
+
+    this.container.querySelector('#start-game').addEventListener('click', () => this.startGame());
+    this.container.querySelector('#shop').addEventListener('click', () => this.showShop());
+    this.container.querySelector('#inventory').addEventListener('click', () => this.showInventory());
+
+    const slider = this.container.querySelector('#bet-slider');
+    slider.addEventListener('input', (e) => {
+      this.betAmount = parseInt(e.target.value);
+      this.container.querySelector('#start-game').textContent = `New Game (Bet: ${this.betAmount})`;
+    });
+  }
+
+  startGame() {
+    if (this.betAmount > this.coins) return alert("Not enough coins!");
+    this.coins -= this.betAmount;
+    this.updateBalance();
+
+    this.clearContainer();
+    this.gameState = 'playing';
+    this.deck = this.createDeck();
+    this.shuffleDeck();
+    this.playerHand = [this.drawCard(), this.drawCard()];
+    this.dealerHand = [this.drawCard(), this.drawCard()];
+    this.gameOver = false;
+    this.bustLimit = 21;
+    this.renderGame();
+    this.checkBlackjack();
+  }
+
+  createDeck() {
+    const suits = ['♠', '♣', '♥', '♦'];
+    const values = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+    return suits.flatMap(suit => values.map(value => ({ value, suit })));
+  }
+
+  shuffleDeck() {
+    for (let i = this.deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+    }
+  }
+
+  drawCard() {
+    return this.deck.pop();
+  }
+
+  calculateScore(hand) {
+    let score = 0;
+    let aces = 0;
+
+    for (const card of hand) {
+      if (card.value === 'A') {
+        aces += 1;
+        score += 11;
+      } else if (['J', 'Q', 'K'].includes(card.value)) {
+        score += 10;
+      } else {
+        score += parseInt(card.value);
+      }
+    }
+
+    while (score > this.bustLimit && aces > 0) {
+      score -= 10;
+      aces -= 1;
+    }
+
+    return score;
+  }
+
+  renderGame() {
+    this.container.innerHTML = `
+      <div id="balance">Coins: ${this.coins}</div>
+      <h3>Dealer's Hand</h3>
+      <div class="cards">
+        ${this.dealerHand.map((card, i) => `
+          <div class="card">${i === 0 && !this.gameOver ? '?' : `${card.value}${card.suit}`}</div>
+        `).join('')}
+      </div>
+
+      <h3>Your Hand</h3>
+      <div class="cards">
+        ${this.playerHand.map(card => `
+          <div class="card ${this.activePowerUps['Card of Need'] ? 'powerup-active' : ''}">${card.value}${card.suit}</div>
+        `).join('')}
+      </div>
+
+      <div class="score">Your Score: ${this.calculateScore(this.playerHand)}</div>
+      <div class="score">Dealer Score: ${this.gameOver ? this.calculateScore(this.dealerHand) : '?'}</div>
+
+      <div class="controls">
+        <button id="hit" ${this.gameOver ? 'disabled' : ''}>Hit</button>
+        <button id="stand" ${this.gameOver ? 'disabled' : ''}>Stand</button>
+        <button id="menu">Main Menu</button>
+      </div>
+
+      <div id="status"></div>
+
+      ${Object.keys(this.activePowerUps).length > 0 ? `
+        <div class="active-powerups">
+          <h4>Active Power-Ups:</h4>
+          ${Object.keys(this.activePowerUps).map(powerup => `
+            <div>${powerup}</div>
+          `).join('')}
+        </div>
+      ` : ''}
+    `;
+
+    this.container.querySelector('#hit').addEventListener('click', () => this.hit());
+    this.container.querySelector('#stand').addEventListener('click', () => this.stand());
+    this.container.querySelector('#menu').addEventListener('click', () => this.showMainMenu());
+  }
+
+  hit() {
+    if (this.gameOver) return;
+
+    if (this.activePowerUps['Golden Card (1 use)']) {
+      const needed = 21 - this.calculateScore(this.playerHand);
+      const bestCard = needed <= 11 ? needed.toString() : 'A';
+      this.playerHand.push({ value: bestCard, suit: '★' });
+      delete this.activePowerUps['Golden Card (1 use)'];
+    } else {
+      this.playerHand.push(this.drawCard());
+    }
+
+    const score = this.calculateScore(this.playerHand);
+
+    if (score > this.bustLimit) {
+      this.gameOver = true;
+      this.container.querySelector('#status').textContent = 'Bust! You lose!';
+      this.checkInsurance();
+    }
+
+    this.renderGame();
+  }
+
+  stand() {
+    this.gameOver = true;
+
+    // Reveal dealer's hidden card
+    const hiddenCard = this.dealerHand[0];
+    this.dealerHand[0] = { ...hiddenCard };
+
+    // Dealer draws until 17 or higher
+    while (this.calculateScore(this.dealerHand) < 17) {
+      this.dealerHand.push(this.drawCard());
+    }
+
+    const playerScore = this.calculateScore(this.playerHand);
+    const dealerScore = this.calculateScore(this.dealerHand);
+
+    let result = '';
+    if (dealerScore > this.bustLimit || playerScore > dealerScore) {
+      result = 'You win!';
+      this.coins += this.betAmount * 2;
+    } else if (playerScore < dealerScore) {
+      result = 'Dealer wins!';
+      this.checkInsurance();
+    } else {
+      result = 'Push!';
+      this.coins += this.betAmount;
+    }
+
+    this.container.querySelector('#status').textContent = result;
+    this.updateBalance();
+    this.renderGame();
+  }
+
+  checkBlackjack() {
+    const playerScore = this.calculateScore(this.playerHand);
+    const dealerScore = this.calculateScore(this.dealerHand);
+
+    if (playerScore === 21) {
+      this.gameOver = true;
+      if (dealerScore === 21) {
+        this.container.querySelector('#status').textContent = 'Both have Blackjack! Push!';
+        this.coins += this.betAmount;
+      } else {
+        this.container.querySelector('#status').textContent = 'Blackjack! You win!';
+        this.coins += this.betAmount * 2.5;
+      }
+      this.updateBalance();
+      this.renderGame();
+    }
+  }
+
+  checkInsurance() {
+    if (this.activePowerUps['Insurance Token']) {
+      this.coins += this.betAmount * 1;
+      this.updateBalance();
+      alert('Insurance paid out 100%!');
+      delete this.activePowerUps['Insurance Token'];
+    }
+  }
+
+  showShop() {
+    this.clearContainer();
+    const shopItems = {
+      "Lucky Charm (3 uses)": { price: 50, effect: "+10% win chance" },
+      "Bust Shield (3 uses)": { price: 75, effect: "Bust at 23 for 3 rounds" },
+      "Golden Card (1 use)": { price: 100, effect: "Draw needed card" },
+      "Insurance Token": { price: 60, effect: "Get 50% bet back if lose" },
+      "Gacha Token": { price: 30, effect: "Random power-up" }
+    };
+
+    this.container.innerHTML = `
+      <div id="balance">Coins: ${this.coins}</div>
+      <h2>Power-Up Shop</h2>
+      <button id="back">← Back</button>
+      <div id="shop-items"></div>
+    `;
+
+    Object.entries(shopItems).forEach(([name, item]) => {
+      const itemEl = document.createElement('div');
+      itemEl.className = 'shop-item';
+      itemEl.innerHTML = `
+        <strong>${name}</strong><br>
+        ${item.price} coins<br>
+        <em>${item.effect}</em>
+      `;
+      itemEl.addEventListener('click', () => this.purchaseItem(name, item));
+      this.container.querySelector('#shop-items').appendChild(itemEl);
+    });
+
+    this.container.querySelector('#back').addEventListener('click', () => this.showMainMenu());
+  }
+
+  purchaseItem(name, item) {
+    if (this.coins >= item.price) {
+      this.coins -= item.price;
+      this.inventory[name] = (this.inventory[name] || 0) + 1;
+      GM_setValue('inventory', this.inventory);
+      this.updateBalance();
+      alert(`Purchased ${name}!`);
+    } else {
+      alert("Not enough coins!");
+    }
+  }
+
+  showInventory() {
+    this.clearContainer();
+    this.container.innerHTML = `
+      <div id="balance">Coins: ${this.coins}</div>
+      <h2>Inventory</h2>
+      <button id="back">← Back</button>
+      <div id="inventory-items"></div>
+    `;
+
+    Object.entries(this.inventory).forEach(([name, quantity]) => {
+      if (quantity > 0) {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'shop-item';
+        itemEl.innerHTML = `
+          <strong>${name}</strong><br>
+          Quantity: ${quantity}<br>
+          <button class="use-item">Use</button>
+        `;
+        itemEl.querySelector('.use-item').addEventListener('click', () => this.usePowerUp(name));
+        this.container.querySelector('#inventory-items').appendChild(itemEl);
+      }
+    });
+
+    this.container.querySelector('#back').addEventListener('click', () => this.showMainMenu());
+  }
+
+  usePowerUp(name) {
+    if (this.inventory[name] > 0) {
+      this.inventory[name]--;
+      this.activatePowerUp(name);
+      GM_setValue('inventory', this.inventory);
+      this.showInventory();
+    }
+  }
+
+  activatePowerUp(name) {
+    const powerups = {
+      "Bust Shield (3 uses)": () => {
+        this.bustLimit = 230;
+        setTimeout(() => {
+          this.bustLimit = 21;
+          alert('Bust Shield expired!');
+        }, 3 * 1000);
+      },
+      "Golden Card (1 use)": () => {
+        this.activePowerUps['Golden Card (1 use)'] = true;
+      },
+      "Insurance Token": () => {
+        this.activePowerUps['Insurance Token'] = true;
+      }
+    };
+
+    if (powerups[name]) {
+      powerups[name]();
+      this.activePowerUps[name] = true;
+    }
+  }
+
+  updateBalance() {
+    GM_setValue('coins', this.coins);
+    document.querySelector('#balance').textContent = `Coins: ${this.coins}`;
+  }
+
+  clearContainer() {
+    this.container.innerHTML = '';
+  }
+}
+
+// Initialize the game when page loads
+window.addEventListener('load', () => new BlackjackCasino());
