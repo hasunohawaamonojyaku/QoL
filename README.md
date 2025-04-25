@@ -31,3 +31,12 @@ QoL Keyword Highlighter is a userscript that enhances your browsing experience b
    ```bash
    git clone https://github.com/your-username/qol-keyword-highlighter.git
 or just copy from above
+
+### pytesseract test
+This is used as OCR to create a change, hope this help someone set up upon this dog crap code, to execute the code, just go to Visual Studio Code or from terminal, then you will encounter a finder folder, click show option and then change the filter to all files and choose a file.
+
+if there are trouble doing so go to https://brew.sh/ and download brew.
+
+ ```brew
+   tessaract
+
