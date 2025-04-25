@@ -38,5 +38,5 @@ This is used as OCR to create a change, hope this help someone set up upon this 
 if there are trouble doing so go to https://brew.sh/ and download brew.
 
  ```brew
-   tessaract
+ brew install tesseract
 
